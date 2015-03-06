@@ -28,9 +28,13 @@ import java.lang.annotation.Target;
 @Target({ElementType.FIELD, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Column {
-  String name() default "";
-  boolean primaryKey() default false;
-  String inverse() default "";
-  boolean forceMap() default false;
-  boolean index() default false;
+    String name() default "";
+
+    boolean primaryKey() default false;
+
+    String inverse() default "";
+
+    boolean forceMap() default false;
+
+    boolean index() default false;
 }
