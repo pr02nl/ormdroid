@@ -117,7 +117,8 @@ public final class TypeMapper {
     mapType(new NumericTypeMapping(Integer.class, "INTEGER"));
     mapType(new NumericTypeMapping(int.class, "INTEGER"));
     mapType(new StringTypeMapping(String.class, "VARCHAR"));
-    
+    mapType(new EnumTypeMapping());
+
   }
   
   private TypeMapper() throws InstantiationException { throw new InstantiationException(); }
