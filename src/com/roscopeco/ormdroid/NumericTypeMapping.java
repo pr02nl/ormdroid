@@ -28,43 +28,47 @@ import java.util.ArrayList;
  *     Obviously would make things more difficult when load()ing...
  */
 public class NumericTypeMapping implements TypeMapping {
-  private Class<?> mJavaType;
-  private String mSqlType;
-  
-  public NumericTypeMapping(Class<?> type, String sqlType) {
-    mJavaType = type;
-    mSqlType = sqlType;      
-  }
+    private Class<?> mJavaType;
+    private String mSqlType;
 
-  public Class<?> javaType() {
-    return mJavaType;
-  }
-
-  public String sqlType(Class<?> concreteType) {
-    return mSqlType;
-  }
-
-  public String encodeValue(SQLiteDatabase db, Object value) {
-    if (value instanceof Boolean) {
-      return (Boolean)value ? "1" : "0";
-    } else {
-      return value.toString();
+    public NumericTypeMapping(Class<?> type, String sqlType) {
+        mJavaType = type;
+        mSqlType = sqlType;
     }
-  }
 
-  // TODO this will cause exceptions when trying to unbox into smaller types...
-  //        or worse, silently lose data... Look into this!
-  public <T extends Entity> Object decodeValue(SQLiteDatabase db, Field field, Cursor c, int columnIndex, ArrayList<T> precursors) {
-    Class<?> expectedType = field.getType();
+    public Class<?> javaType() {
+        return mJavaType;
+    }
 
-    if (expectedType.equals(Boolean.class) || expectedType.equals(boolean.class)) {
-      return c.getInt(columnIndex) != 0;
+    public String sqlType(Class<?> concreteType) {
+        return mSqlType;
     }
-    else if (expectedType.equals(Float.class) || expectedType.equals(float.class)) {
-      return c.getFloat(columnIndex);
+
+    public String encodeValue(SQLiteDatabase db, Object value) {
+        if (value instanceof Boolean) {
+            return (Boolean) value ? "1" : "0";
+        } else {
+            return value.toString();
+        }
     }
-    else {
-      return c.getInt(columnIndex);
+
+    // TODO this will cause exceptions when trying to unbox into smaller types...
+    //        or worse, silently lose data... Look into this!
+    public <T extends Entity> Object decodeValue(SQLiteDatabase db, Field field, Cursor c, int columnIndex, ArrayList<T> precursors) {
+        Class<?> expectedType = field.getType();
+
+        if (expectedType.equals(Boolean.class) || expectedType.equals(boolean.class)) {
+            return c.getInt(columnIndex) != 0;
+        } else if (expectedType.equals(Double.class) || expectedType.equals(double.class)) {
+            return c.getDouble(columnIndex);
+        } else if (expectedType.equals(Long.class) || expectedType.equals(long.class)) {
+            return c.getLong(columnIndex);
+        } else if (expectedType.equals(Short.class) || expectedType.equals(short.class) || expectedType.equals(Byte.class) || expectedType.equals(byte.class)) {
+            return c.getShort(columnIndex);
+        } else if (expectedType.equals(Float.class) || expectedType.equals(float.class)) {
+            return c.getFloat(columnIndex);
+        } else {
+            return c.getInt(columnIndex);
+        }
     }
-  }
 }

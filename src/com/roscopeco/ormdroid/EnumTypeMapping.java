@@ -1,6 +1,7 @@
 package com.roscopeco.ormdroid;
 
 import android.database.Cursor;
+import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 
 import java.lang.reflect.Field;
@@ -27,7 +28,7 @@ public class EnumTypeMapping implements TypeMapping {
             return null;
         }
         Enum e = (Enum) value;
-        return e.name();
+        return DatabaseUtils.sqlEscapeString(e.name());
     }
 
     @Override

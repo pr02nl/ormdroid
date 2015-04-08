@@ -293,6 +293,7 @@ public class Query<T extends Entity> {
 
     public long count() {
         SQLiteDatabase db = ORMDroidApplication.getDefaultDatabase();
+        Entity.getEntityMappingEnsureSchema(db, mClass);
         count = true;
         String generate = generate(-1);
         return DatabaseUtils.longForQuery(db, generate, null);
