@@ -17,7 +17,9 @@ package com.roscopeco.ormdroid;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.util.Log;
+import android.util.SparseBooleanArray;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -156,19 +158,273 @@ import java.util.regex.Pattern;
  * using reflection).</p>
  */
 public abstract class Entity {
+    private static final HashMap<Class<? extends Entity>, EntityMapping> entityMappings = new HashMap<Class<? extends Entity>, EntityMapping>();
+    boolean mTransient;
+    private EntityMapping mMappingCache;
+
+    protected Entity() {
+        mTransient = true;
+    }
+
+    /*
+     * Package private - used by Query as well as locally...
+     */
+    static EntityMapping getEntityMapping(Class<? extends Entity> clz) {
+        EntityMapping mapping = entityMappings.get(clz);
+
+        if (mapping == null) {
+            // build map
+            entityMappings.put(clz, mapping = EntityMapping.build(clz));
+        }
+
+        return mapping;
+    }
+
+    /*
+     * Flushes the schema creation cache, ensuring that all existing mapping's
+     * schemas will be recreated if they do not exist when they're next accessed.
+     *
+     * See issue #17
+     */
+    static void flushSchemaCreationCache() {
+        for (Class<? extends Entity> clz : entityMappings.keySet()) {
+            entityMappings.get(clz).mSchemaCreated = false;
+        }
+    }
+
+    static EntityMapping getEntityMappingEnsureSchema(SQLiteDatabase db,
+                                                      Class<? extends Entity> clz) {
+        EntityMapping map = getEntityMapping(clz);
+        if (!map.mSchemaCreated) {
+            map.createSchema(db);
+        }
+        return map;
+    }
+
+    /**
+     * <p>Create a new {@link Query} that will query against the
+     * table mapped to the specified class.</p>
+     * <p/>
+     * <p>See the {@link Query} documentation for examples of
+     * usage.</p>
+     *
+     * @param clz The class to query.
+     * @return A new <code>Query</code>.
+     */
+    public static <T extends Entity> Query<T> query(Class<T> clz) {
+        return new Query<T>(clz);
+    }
+
+    /**
+     * Load the next entity from the given cursor using the default database.
+     * <p/>
+     * If the cursor does not reference the default database, then you should
+     * instead use {@link #load(Class, SQLiteDatabase, Cursor)} to allow the
+     * database from which linked entities will be loaded.
+     *
+     * @param clz The class of Entity the cursor holds.
+     * @param c   The cursor.
+     * @return the loaded entity.
+     */
+    public static <T extends Entity> T load(Class<T> clz, Cursor c) {
+        return load(clz, ORMDroidApplication.getDefaultDatabase(), c);
+    }
+
+    /**
+     * Load the next entity from the given cursor using the specified database.
+     *
+     * @param clz The class of Entity the cursor holds.
+     * @param db  The database from which to load any linked entities.
+     * @param c   The cursor.
+     * @return the loaded entity.
+     */
+    public static <T extends Entity> T load(Class<T> clz, SQLiteDatabase db, Cursor c) {
+        // Go ahead and assume schema already exists, since we have a cursor...
+        return getEntityMapping(clz).<T>load(db, c);
+    }
+
+    /**
+     * Load all entities from the given cursor using the default database.
+     * <p/>
+     * If the cursor does not reference the default database, then you should
+     * instead use {@link #load(Class, SQLiteDatabase, Cursor)} to allow the
+     * database from which linked entities will be loaded.
+     *
+     * @param clz The class of Entity the cursor holds.
+     * @param c   The cursor.
+     * @return the loaded entities, in a List.
+     */
+    public static <T extends Entity> List<T> loadAll(Class<T> clz, Cursor c) {
+        return loadAll(clz, ORMDroidApplication.getDefaultDatabase(), c);
+    }
+
+    /**
+     * Load all entities from the given cursor using the specified database.
+     *
+     * @param clz The class of Entity the cursor holds.
+     * @param db  The database from which to load any linked entities.
+     * @param c   The cursor.
+     * @return the loaded entities, in a List.
+     */
+    public static <T extends Entity> List<T> loadAll(Class<T> clz, SQLiteDatabase db, Cursor c) {
+        // Go ahead and assume schema already exists, since we have a cursor...
+        return getEntityMapping(clz).<T>loadAll(db, c);
+    }
+
+    /**
+     * <p>Determine whether this instance is backed by the database.</p>
+     * <p/>
+     * <p><strong>Note</strong> that a <code>false</code> result
+     * from this method does <strong>not</strong> indicate that
+     * the data in the database is up to date with respect to the
+     * object's fields.</p>
+     *
+     * @return <code>false</code> if this object is stored in the database.
+     */
+    public boolean isTransient() {
+        return mTransient;
+    }
+
+    private EntityMapping getEntityMapping() {
+        // This may be called multiple times on a single instance,
+        // (e.g. during a save, looking for primary keys and whatnot)
+        // so we cache it per instance, to save the hash cache lookup...
+        if (mMappingCache != null) {
+            return mMappingCache;
+        } else {
+            return mMappingCache = getEntityMapping(getClass());
+        }
+    }
+
+    private EntityMapping getEntityMappingEnsureSchema(SQLiteDatabase db) {
+        EntityMapping map = getEntityMapping();
+        if (!map.mSchemaCreated) {
+            map.createSchema(db);
+        }
+        return map;
+    }
+
+    /**
+     * <p>Get the value of the primary key field for this object.</p>
+     * <p/>
+     * <p>Note that this currently uses reflection.</p>
+     *
+     * @return The primary key value.
+     */
+    public Object getPrimaryKeyValue() {
+        return getEntityMapping().getPrimaryKeyValue(this);
+    }
+
+    /**
+     * Insert or update this object using the specified database
+     * connection.
+     *
+     * @param db The database connection to use.
+     * @return The primary key of the inserted item (if object was transient), or -1 if an update was performed.
+     */
+    public int save(SQLiteDatabase db) {
+        EntityMapping mapping = getEntityMappingEnsureSchema(db);
+
+        int result = -1;
+
+        if (mTransient) {
+            result = mapping.insert(db, this);
+            mTransient = false;
+        } else {
+            mapping.update(db, this);
+        }
+
+        return result;
+    }
+
+    /**
+     * Insert or update this object using the default database
+     * connection.
+     *
+     * @return The primary key of the inserted item (if object was transient), or -1 if an update was performed.
+     */
+    public int save() {
+        SQLiteDatabase db = ORMDroidApplication.getDefaultDatabase();
+        db.beginTransaction();
+
+        int result = -1;
+
+        try {
+            result = save(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+
+        db.close();
+        return result;
+    }
+
+    /**
+     * Delete this object using the specified database connection.
+     *
+     * @param db The database connection to use.
+     */
+    public void delete(SQLiteDatabase db) {
+        EntityMapping mapping = getEntityMappingEnsureSchema(db);
+
+        if (!mTransient) {
+            mapping.delete(db, this);
+            this.mTransient = true;
+        }
+    }
+
+    /**
+     * Delete this object using the default database connection.
+     */
+    public void delete() {
+        if (!mTransient) {
+            SQLiteDatabase db = ORMDroidApplication.getDefaultDatabase();
+            db.beginTransaction();
+
+            try {
+                delete(db);
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+
+            db.close();
+        }
+    }
+
+    /**
+     * Defines equality in terms of primary key values.
+     */
+    @Override
+    public boolean equals(Object other) {
+        // TODO indirectly using reflection here (via getPrimaryKeyValue).
+        return other != null &&
+                other.getClass().equals(getClass()) &&
+                ((Entity) other).getPrimaryKeyValue().equals(getPrimaryKeyValue());
+    }
+
+    /**
+     * Defines the hash code in terms of the primary key value.
+     */
+    @Override
+    public int hashCode() {
+        // TODO this uses reflection. Also, could act wierd if non-int primary keys...
+        return 31 * getClass().hashCode() + getPrimaryKeyValue().hashCode();
+    }
+
     static final class EntityMapping {
         private static final String TAG = "INTERNAL<EntityMapping>";
         private static final Pattern MATCH_DOTDOLLAR = Pattern.compile("[\\.\\$]");
-
-        private Class<? extends Entity> mMappedClass;
         String mTableName;
-        private Field mPrimaryKey;
         String mPrimaryKeyColumnName;
+        boolean mSchemaCreated = false;
+        private Class<? extends Entity> mMappedClass;
+        private Field mPrimaryKey;
         private ArrayList<String> mColumnNames = new ArrayList<String>();
         private ArrayList<Field> mFields = new ArrayList<Field>();
         private ArrayList<Field> mInverseFields = new ArrayList<Field>();
         private ArrayList<Field> mIndexFields = new ArrayList<Field>();
-        boolean mSchemaCreated = false;
 
         // Not concerned too much about reflective annotation access in this
         // method, since this only runs once per model class...
@@ -288,14 +544,42 @@ public abstract class Entity {
         }
 
         void updateSchema(SQLiteDatabase db) {
+
+            ArrayList<String> colNames = mColumnNames;
+            ArrayList<Field> fields = mFields;
+            SparseBooleanArray selectedItems = new SparseBooleanArray(colNames.size());
+
+            for (int i = 0; i < colNames.size(); i++) {
+                selectedItems.put(i, true);
+            }
             Cursor cursor = db.rawQuery("PRAGMA table_info(" + mTableName + ");", null);
-            cursor.getCount();
             int cidIndex = cursor.getColumnIndex("cid");
             int nameIndex = cursor.getColumnIndex("name");
             int typeIndex = cursor.getColumnIndex("type");
             int notnullIndex = cursor.getColumnIndex("notnull");
             int dflt_valueIndex = cursor.getColumnIndex("dflt_value");
             int pkIndex = cursor.getColumnIndex("pk");
+            if (cursor.moveToFirst()) {
+                do {
+                    String nameColumn = cursor.getString(nameIndex);
+                    for (int i = 0; i < colNames.size(); i++) {
+                        if (colNames.get(i).equals(nameColumn)) {
+                            selectedItems.put(i, false);
+                        }
+                    }
+                } while (cursor.moveToNext());
+            }
+            for (int i = 0; i < selectedItems.size(); i++) {
+                if (selectedItems.get(i)) {
+                    Class<?> ftype = fields.get(i).getType();
+                    String columName = colNames.get(i);
+                    StringBuilder b = new StringBuilder();
+                    b.append("ALTER TABLE ").append(mTableName).append(" ADD COLUMN ").append(colNames.get(i)).append(" ").append(TypeMapper.sqlType(ftype)).append(";");
+                    String sql = b.toString();
+                    Log.v(TAG, sql);
+                    db.execSQL(sql);
+                }
+            }
         }
 
         void createSchema(SQLiteDatabase db) {
@@ -483,6 +767,9 @@ public abstract class Entity {
                 } else {
                     throw new ORMDroidException("Failed to get last inserted id after INSERT");
                 }
+            } catch (SQLiteException e) {
+                updateSchema(db);
+                throw e;
             } finally {
                 c.close();
             }
@@ -558,6 +845,7 @@ public abstract class Entity {
 
                     if (colIndex == -1) {
                         Log.e("Internal<ModelMapping>", "Got -1 column index for `" + colNames.get(i) + "' - Database schema may not match entity");
+                        updateSchema(db);
                         throw new ORMDroidException("Got -1 column index for `" + colNames.get(i) + "' - Database schema may not match entity");
                     } else {
                         Object o = TypeMapper.getMapping(ftype).decodeValue(db, f, c, colIndex, precursors);
@@ -602,7 +890,7 @@ public abstract class Entity {
                     list.add(this.<T>load(db, c));
                 } while (c.moveToNext());
             }
-      
+
       /* issue #6 */
             c.close();
 
@@ -619,260 +907,4 @@ public abstract class Entity {
         }
 
     } // end of EntityMapping
-
-    private static final HashMap<Class<? extends Entity>, EntityMapping> entityMappings = new HashMap<Class<? extends Entity>, EntityMapping>();
-
-    /*
-     * Package private - used by Query as well as locally...
-     */
-    static EntityMapping getEntityMapping(Class<? extends Entity> clz) {
-        EntityMapping mapping = entityMappings.get(clz);
-
-        if (mapping == null) {
-            // build map
-            entityMappings.put(clz, mapping = EntityMapping.build(clz));
-        }
-
-        return mapping;
-    }
-
-    /*
-     * Flushes the schema creation cache, ensuring that all existing mapping's
-     * schemas will be recreated if they do not exist when they're next accessed.
-     *
-     * See issue #17
-     */
-    static void flushSchemaCreationCache() {
-        for (Class<? extends Entity> clz : entityMappings.keySet()) {
-            entityMappings.get(clz).mSchemaCreated = false;
-        }
-    }
-
-    static EntityMapping getEntityMappingEnsureSchema(SQLiteDatabase db,
-                                                      Class<? extends Entity> clz) {
-        EntityMapping map = getEntityMapping(clz);
-        if (!map.mSchemaCreated) {
-            map.createSchema(db);
-        }
-        return map;
-    }
-
-    /**
-     * <p>Create a new {@link Query} that will query against the
-     * table mapped to the specified class.</p>
-     * <p/>
-     * <p>See the {@link Query} documentation for examples of
-     * usage.</p>
-     *
-     * @param clz The class to query.
-     * @return A new <code>Query</code>.
-     */
-    public static <T extends Entity> Query<T> query(Class<T> clz) {
-        return new Query<T>(clz);
-    }
-
-    /**
-     * Load the next entity from the given cursor using the default database.
-     * <p/>
-     * If the cursor does not reference the default database, then you should
-     * instead use {@link #load(Class, SQLiteDatabase, Cursor)} to allow the
-     * database from which linked entities will be loaded.
-     *
-     * @param clz The class of Entity the cursor holds.
-     * @param c   The cursor.
-     * @return the loaded entity.
-     */
-    public static <T extends Entity> T load(Class<T> clz, Cursor c) {
-        return load(clz, ORMDroidApplication.getDefaultDatabase(), c);
-    }
-
-    /**
-     * Load the next entity from the given cursor using the specified database.
-     *
-     * @param clz The class of Entity the cursor holds.
-     * @param db  The database from which to load any linked entities.
-     * @param c   The cursor.
-     * @return the loaded entity.
-     */
-    public static <T extends Entity> T load(Class<T> clz, SQLiteDatabase db, Cursor c) {
-        // Go ahead and assume schema already exists, since we have a cursor...
-        return getEntityMapping(clz).<T>load(db, c);
-    }
-
-    /**
-     * Load all entities from the given cursor using the default database.
-     * <p/>
-     * If the cursor does not reference the default database, then you should
-     * instead use {@link #load(Class, SQLiteDatabase, Cursor)} to allow the
-     * database from which linked entities will be loaded.
-     *
-     * @param clz The class of Entity the cursor holds.
-     * @param c   The cursor.
-     * @return the loaded entities, in a List.
-     */
-    public static <T extends Entity> List<T> loadAll(Class<T> clz, Cursor c) {
-        return loadAll(clz, ORMDroidApplication.getDefaultDatabase(), c);
-    }
-
-    /**
-     * Load all entities from the given cursor using the specified database.
-     *
-     * @param clz The class of Entity the cursor holds.
-     * @param db  The database from which to load any linked entities.
-     * @param c   The cursor.
-     * @return the loaded entities, in a List.
-     */
-    public static <T extends Entity> List<T> loadAll(Class<T> clz, SQLiteDatabase db, Cursor c) {
-        // Go ahead and assume schema already exists, since we have a cursor...
-        return getEntityMapping(clz).<T>loadAll(db, c);
-    }
-
-    boolean mTransient;
-    private EntityMapping mMappingCache;
-
-    protected Entity() {
-        mTransient = true;
-    }
-
-    /**
-     * <p>Determine whether this instance is backed by the database.</p>
-     * <p/>
-     * <p><strong>Note</strong> that a <code>false</code> result
-     * from this method does <strong>not</strong> indicate that
-     * the data in the database is up to date with respect to the
-     * object's fields.</p>
-     *
-     * @return <code>false</code> if this object is stored in the database.
-     */
-    public boolean isTransient() {
-        return mTransient;
-    }
-
-    private EntityMapping getEntityMapping() {
-        // This may be called multiple times on a single instance,
-        // (e.g. during a save, looking for primary keys and whatnot)
-        // so we cache it per instance, to save the hash cache lookup...
-        if (mMappingCache != null) {
-            return mMappingCache;
-        } else {
-            return mMappingCache = getEntityMapping(getClass());
-        }
-    }
-
-    private EntityMapping getEntityMappingEnsureSchema(SQLiteDatabase db) {
-        EntityMapping map = getEntityMapping();
-        if (!map.mSchemaCreated) {
-            map.createSchema(db);
-        }
-        return map;
-    }
-
-    /**
-     * <p>Get the value of the primary key field for this object.</p>
-     * <p/>
-     * <p>Note that this currently uses reflection.</p>
-     *
-     * @return The primary key value.
-     */
-    public Object getPrimaryKeyValue() {
-        return getEntityMapping().getPrimaryKeyValue(this);
-    }
-
-    /**
-     * Insert or update this object using the specified database
-     * connection.
-     *
-     * @param db The database connection to use.
-     * @return The primary key of the inserted item (if object was transient), or -1 if an update was performed.
-     */
-    public int save(SQLiteDatabase db) {
-        EntityMapping mapping = getEntityMappingEnsureSchema(db);
-
-        int result = -1;
-
-        if (mTransient) {
-            result = mapping.insert(db, this);
-            mTransient = false;
-        } else {
-            mapping.update(db, this);
-        }
-
-        return result;
-    }
-
-    /**
-     * Insert or update this object using the default database
-     * connection.
-     *
-     * @return The primary key of the inserted item (if object was transient), or -1 if an update was performed.
-     */
-    public int save() {
-        SQLiteDatabase db = ORMDroidApplication.getDefaultDatabase();
-        db.beginTransaction();
-
-        int result = -1;
-
-        try {
-            result = save(db);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-
-        db.close();
-        return result;
-    }
-
-    /**
-     * Delete this object using the specified database connection.
-     *
-     * @param db The database connection to use.
-     */
-    public void delete(SQLiteDatabase db) {
-        EntityMapping mapping = getEntityMappingEnsureSchema(db);
-
-        if (!mTransient) {
-            mapping.delete(db, this);
-            this.mTransient = true;
-        }
-    }
-
-    /**
-     * Delete this object using the default database connection.
-     */
-    public void delete() {
-        if (!mTransient) {
-            SQLiteDatabase db = ORMDroidApplication.getDefaultDatabase();
-            db.beginTransaction();
-
-            try {
-                delete(db);
-                db.setTransactionSuccessful();
-            } finally {
-                db.endTransaction();
-            }
-
-            db.close();
-        }
-    }
-
-    /**
-     * Defines equality in terms of primary key values.
-     */
-    @Override
-    public boolean equals(Object other) {
-        // TODO indirectly using reflection here (via getPrimaryKeyValue).
-        return other != null &&
-                other.getClass().equals(getClass()) &&
-                ((Entity) other).getPrimaryKeyValue().equals(getPrimaryKeyValue());
-    }
-
-    /**
-     * Defines the hash code in terms of the primary key value.
-     */
-    @Override
-    public int hashCode() {
-        // TODO this uses reflection. Also, could act wierd if non-int primary keys...
-        return 31 * getClass().hashCode() + getPrimaryKeyValue().hashCode();
-    }
 }
