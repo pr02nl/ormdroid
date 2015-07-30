@@ -756,8 +756,14 @@ public abstract class Entity {
 
             Log.v(getClass().getSimpleName(), sql);
 
-            db.execSQL(sql);
-
+            try {
+                db.execSQL(sql);
+            } catch (SQLiteException e) {
+                if (db.inTransaction())
+                    db.endTransaction();
+                updateSchema(db);
+                throw e;
+            }
             Cursor c = db.rawQuery("select last_insert_rowid();", null);
             try {
                 if (c.moveToFirst()) {
@@ -767,9 +773,6 @@ public abstract class Entity {
                 } else {
                     throw new ORMDroidException("Failed to get last inserted id after INSERT");
                 }
-            } catch (SQLiteException e) {
-                updateSchema(db);
-                throw e;
             } finally {
                 c.close();
             }
