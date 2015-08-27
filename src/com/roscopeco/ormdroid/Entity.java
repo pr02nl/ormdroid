@@ -620,6 +620,7 @@ public abstract class Entity {
             }
 
             mSchemaCreated = true;
+            updateSchema(db);
         }
 
         private boolean isPrimaryKey(Field f) {

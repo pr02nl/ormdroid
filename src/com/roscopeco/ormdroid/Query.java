@@ -22,7 +22,6 @@ import android.util.Log;
 
 import com.roscopeco.ormdroid.Entity.EntityMapping;
 
-import java.lang.String;
 import java.util.List;
 
 /**
@@ -42,59 +41,18 @@ import java.util.List;
  */
 public class Query<T extends Entity> {
     private static final String TAG = "Query";
-
-    public static interface SQLExpression {
-        String generate();
-    }
-
-    static class BinExpr implements SQLExpression {
-        static final String EQ = " = ";
-        static final String NE = " != ";
-        static final String LT = " < ";
-        static final String GT = " > ";
-        static final String LEQ = " <= ";
-        static final String GEQ = " >= ";
-
-        final String op;
-        final String column;
-        final Object value;
-
-        public BinExpr(String op, String column, Object value) {
-            this.op = op;
-            this.column = column;
-            this.value = value;
-        }
-
-        public String generate() {
-            return column + op + value;
-        }
-    }
-
-    static class LogicalExpr implements SQLExpression {
-        final String op;
-        final SQLExpression[] operands;
-
-        public LogicalExpr(String op, SQLExpression... operands) {
-            this.op = op;
-            if (operands.length < 2) {
-                throw new IllegalArgumentException("Cannot create logical expression with < 2 operands");
-            }
-            this.operands = operands;
-        }
-
-        public String generate() {
-            StringBuilder sb = new StringBuilder();
-
-            sb.append("(");
-
-            for (int i = 0; i < operands.length - 1; i++) {
-                sb.append(operands[i].generate()).append(" ").append(op).append(" ");
-            }
-
-            sb.append(operands[operands.length - 1].generate()).append(")");
-
-            return sb.toString();
-        }
+    private final Class<T> mClass;
+    private final EntityMapping mEntityMapping;
+    private String customSql;
+    private String sqlCache, sqlCache1, whereCache;
+    private SQLExpression whereExpr;
+    private String[] orderByColumns;
+    private boolean orderByReversed;
+    private boolean count;
+    private String[] groupByColumns;
+    private int limit = -1;
+    public Query(Class<T> clz) {
+        mEntityMapping = Entity.getEntityMapping(mClass = clz);
     }
 
     private static StringBuilder joinStrings(StringBuilder sb, String mod, String... strings) {
@@ -111,21 +69,6 @@ public class Query<T extends Entity> {
             }
             return sb;
         }
-    }
-
-    private final Class<T> mClass;
-    private final EntityMapping mEntityMapping;
-    private String customSql;
-    private String sqlCache, sqlCache1, whereCache;
-    private SQLExpression whereExpr;
-    private String[] orderByColumns;
-    private boolean orderByReversed;
-    private boolean count;
-    private String[] groupByColumns;
-    private int limit = -1;
-
-    public Query(Class<T> clz) {
-        mEntityMapping = Entity.getEntityMapping(mClass = clz);
     }
 
     public static <T extends Entity> Query<T> query(Class<T> clz) {
@@ -154,6 +97,14 @@ public class Query<T extends Entity> {
 
     public static SQLExpression geq(String column, Object value) {
         return new BinExpr(BinExpr.GEQ, column, TypeMapper.encodeValue(null, value));
+    }
+
+    public static SQLExpression isNull(String column) {
+        return new BinExpr(BinExpr.IS, column, "NULL");
+    }
+
+    public static SQLExpression isNotNull(String column) {
+        return new BinExpr(BinExpr.ISNOT, column, "NULL");
     }
 
     public static SQLExpression and(SQLExpression... operands) {
@@ -380,5 +331,61 @@ public class Query<T extends Entity> {
         String sql = toSql();
         Log.v(TAG, sql);
         return map.loadAll(db, db.rawQuery(sql, null));
+    }
+
+    public static interface SQLExpression {
+        String generate();
+    }
+
+    static class BinExpr implements SQLExpression {
+        static final String EQ = " = ";
+        static final String NE = " != ";
+        static final String LT = " < ";
+        static final String GT = " > ";
+        static final String LEQ = " <= ";
+        static final String GEQ = " >= ";
+        static final String IS = " IS ";
+        static final String ISNOT = " IS NOT ";
+
+        final String op;
+        final String column;
+        final Object value;
+
+        public BinExpr(String op, String column, Object value) {
+            this.op = op;
+            this.column = column;
+            this.value = value;
+        }
+
+        public String generate() {
+            return column + op + value;
+        }
+    }
+
+    static class LogicalExpr implements SQLExpression {
+        final String op;
+        final SQLExpression[] operands;
+
+        public LogicalExpr(String op, SQLExpression... operands) {
+            this.op = op;
+            if (operands.length < 2) {
+                throw new IllegalArgumentException("Cannot create logical expression with < 2 operands");
+            }
+            this.operands = operands;
+        }
+
+        public String generate() {
+            StringBuilder sb = new StringBuilder();
+
+            sb.append("(");
+
+            for (int i = 0; i < operands.length - 1; i++) {
+                sb.append(operands[i].generate()).append(" ").append(op).append(" ");
+            }
+
+            sb.append(operands[operands.length - 1].generate()).append(")");
+
+            return sb.toString();
+        }
     }
 }
