@@ -360,6 +360,27 @@ public abstract class Entity {
         return result;
     }
 
+    public static int save(List<Entity> list) {
+        SQLiteDatabase db = ORMDroidApplication.getDefaultDatabase();
+        db.beginTransaction();
+
+        int result = 0;
+
+        try {
+            for (Entity entity : list) {
+                if (entity.save(db) != -1) {
+                    result++;
+                }
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+
+        db.close();
+        return result;
+    }
+
     /**
      * Delete this object using the specified database connection.
      *
