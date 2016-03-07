@@ -51,6 +51,7 @@ public class Query<T extends Entity> {
     private boolean count;
     private String[] groupByColumns;
     private int limit = -1;
+
     public Query(Class<T> clz) {
         mEntityMapping = Entity.getEntityMapping(mClass = clz);
     }
@@ -105,6 +106,10 @@ public class Query<T extends Entity> {
 
     public static SQLExpression isNotNull(String column) {
         return new BinExpr(BinExpr.ISNOT, column, "NULL");
+    }
+
+    public static SQLExpression like(String column, Object value) {
+        return new BinExpr(BinExpr.LIKE, column, value);
     }
 
     public static SQLExpression and(SQLExpression... operands) {
@@ -346,6 +351,7 @@ public class Query<T extends Entity> {
         static final String GEQ = " >= ";
         static final String IS = " IS ";
         static final String ISNOT = " IS NOT ";
+        static final String LIKE = " LIKE ";
 
         final String op;
         final String column;
