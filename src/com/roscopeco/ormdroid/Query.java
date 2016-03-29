@@ -109,7 +109,7 @@ public class Query<T extends Entity> {
     }
 
     public static SQLExpression like(String column, Object value) {
-        return new BinExpr(BinExpr.LIKE, column, value);
+        return new BinExpr(BinExpr.LIKE, column, TypeMapper.encodeValue(null, value));
     }
 
     public static SQLExpression and(SQLExpression... operands) {
@@ -252,7 +252,11 @@ public class Query<T extends Entity> {
         Entity.getEntityMappingEnsureSchema(db, mClass);
         count = true;
         String generate = generate(-1);
-        return DatabaseUtils.longForQuery(db, generate, null);
+        try {
+            return DatabaseUtils.longForQuery(db, generate, null);
+        } finally {
+            db.close();
+        }
     }
 
     /**
