@@ -51,9 +51,16 @@ public class Query<T extends Entity> {
     private boolean count;
     private String[] groupByColumns;
     private int limit = -1;
+    private int offset = -1;
+    private String innerName = null;
 
     public Query(Class<T> clz) {
         mEntityMapping = Entity.getEntityMapping(mClass = clz);
+    }
+
+    public Query(Class<T> clz, String innerName) {
+        mEntityMapping = Entity.getEntityMapping(mClass = clz);
+        this.innerName = innerName;
     }
 
     private static StringBuilder joinStrings(StringBuilder sb, String mod, String... strings) {
@@ -78,6 +85,10 @@ public class Query<T extends Entity> {
 
     public static SQLExpression eql(String column, Object value) {
         return new BinExpr(BinExpr.EQ, column, TypeMapper.encodeValue(null, value));
+    }
+
+    public static SQLExpression eeql(String column, Object value) {
+        return new BinExpr(BinExpr.EQ, column, value);
     }
 
     public static SQLExpression neq(String column, Object value) {
@@ -136,6 +147,7 @@ public class Query<T extends Entity> {
         whereExpr = null;
         orderByColumns = null;
         limit = -1;
+        offset = -1;
         count = false;
         customSql = sql;
         return this;
@@ -203,6 +215,17 @@ public class Query<T extends Entity> {
         return this;
     }
 
+    public Query<T> offset(int offset) {
+        if (customSql != null) {
+            throw new IllegalStateException("Cannot change query parameters on custom SQL Query");
+        }
+
+        sqlCache = null;
+        sqlCache1 = null;
+        this.offset = offset;
+        return this;
+    }
+
     private String generate(int limit) {
         StringBuilder sb = new StringBuilder().append("SELECT ");
         if (count) {
@@ -211,6 +234,9 @@ public class Query<T extends Entity> {
             sb.append(mEntityMapping.mTableName).append(".* FROM ");
         }
         sb.append(mEntityMapping.mTableName);
+        if (innerName != null) {
+            sb.append(", ").append(innerName);
+        }
 
         if (customSql != null) {
             return sb.append(" ").append(customSql).toString();
@@ -231,6 +257,9 @@ public class Query<T extends Entity> {
         }
         if (limit > -1) {
             sb.append(" LIMIT ").append(limit);
+        }
+        if (offset > -1) {
+            sb.append(" OFFSET ").append(offset);
         }
         return sb.toString();
     }

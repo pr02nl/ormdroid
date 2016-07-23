@@ -215,6 +215,10 @@ public abstract class Entity {
         return new Query<T>(clz);
     }
 
+    public static <T extends Entity> Query<T> query(Class<T> clz, String innerJoin) {
+        return new Query<T>(clz, innerJoin);
+    }
+
     /**
      * Load the next entity from the given cursor using the default database.
      * <p/>
@@ -313,6 +317,10 @@ public abstract class Entity {
      */
     public Object getPrimaryKeyValue() {
         return getEntityMapping().getPrimaryKeyValue(this);
+    }
+
+    public String getTableName() {
+        return getEntityMapping().mTableName;
     }
 
     /**
